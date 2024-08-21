@@ -1,0 +1,69 @@
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.ListOffsetsResult;
+import org.apache.kafka.clients.admin.OffsetSpec;
+import org.apache.kafka.common.TopicPartition;
+
+import java.util.*;
+
+public class KafkaTopicMessageCount {
+
+    public static void main(String[] args) throws Exception {
+        // Kafka broker address
+        String bootstrapServers = "localhost:9092";
+
+        // Kafka topic name
+        String topicName = "your-topic-name";
+
+        // Create Kafka AdminClient configuration properties
+        Properties config = new Properties();
+        config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+
+        // Create an AdminClient instance
+        try (AdminClient adminClient = AdminClient.create(config)) {
+            // Get the list of partitions for the topic
+            List<TopicPartition> partitions = getPartitionsForTopic(adminClient, topicName);
+
+            // Get the earliest and latest offsets for each partition
+            long totalMessages = getTotalMessagesInTopic(adminClient, partitions);
+
+            // Print the total number of messages in the topic
+            System.out.println("Total number of messages in topic '" + topicName + "': " + totalMessages);
+        }
+    }
+
+    // Method to get all partitions for the topic
+    private static List<TopicPartition> getPartitionsForTopic(AdminClient adminClient, String topicName) throws Exception {
+        return adminClient.describeTopics(Collections.singletonList(topicName))
+                .allTopicNames()
+                .get()
+                .get(topicName)
+                .partitions()
+                .stream()
+                .map(partitionInfo -> new TopicPartition(topicName, partitionInfo.partition()))
+                .toList();
+    }
+
+    // Method to calculate the total number of messages in a topic
+    private static long getTotalMessagesInTopic(AdminClient adminClient, List<TopicPartition> partitions) throws Exception {
+        Map<TopicPartition, OffsetSpec> earliestOffsetsRequest = new HashMap<>();
+        Map<TopicPartition, OffsetSpec> latestOffsetsRequest = new HashMap<>();
+
+        for (TopicPartition partition : partitions) {
+            earliestOffsetsRequest.put(partition, OffsetSpec.earliest());
+            latestOffsetsRequest.put(partition, OffsetSpec.latest());
+        }
+
+        ListOffsetsResult earliestOffsets = adminClient.listOffsets(earliestOffsetsRequest);
+        ListOffsetsResult latestOffsets = adminClient.listOffsets(latestOffsetsRequest);
+
+        long totalMessages = 0;
+        for (TopicPartition partition : partitions) {
+            long earliestOffset = earliestOffsets.partitionResult(partition).get().offset();
+            long latestOffset = latestOffsets.partitionResult(partition).get().offset();
+            totalMessages += (latestOffset - earliestOffset);
+        }
+
+        return totalMessages;
+    }
+}
