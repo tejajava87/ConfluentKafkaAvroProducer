@@ -45,8 +45,12 @@ public class KafkaTopicMessageDeleter {
     // Method to delete records from a specified partition up to a specific offset
     private static void deleteRecordsFromPartition(AdminClient adminClient, String topicName, int partitionNumber, long offsetToDelete) throws ExecutionException, InterruptedException {
         TopicPartition topicPartition = new TopicPartition(topicName, partitionNumber);
-        Map<TopicPartition, Long> partitionOffsets = Collections.singletonMap(topicPartition, offsetToDelete);
 
+        // Create a map of the partition and the corresponding RecordsToDelete object
+        Map<TopicPartition, RecordsToDelete> partitionOffsets = new HashMap<>();
+        partitionOffsets.put(topicPartition, RecordsToDelete.beforeOffset(offsetToDelete));
+
+        // Execute the delete operation
         DeleteRecordsResult deleteRecordsResult = adminClient.deleteRecords(partitionOffsets);
 
         // Wait for the delete operation to complete
