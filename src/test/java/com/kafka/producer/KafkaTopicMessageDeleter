@@ -1,0 +1,56 @@
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.DeleteRecordsResult;
+import org.apache.kafka.clients.admin.ListOffsetsResult;
+import org.apache.kafka.clients.admin.OffsetSpec;
+import org.apache.kafka.common.KafkaFuture;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.requests.OffsetDeleteResponse;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.ExecutionException;
+
+public class KafkaTopicMessageDeleter {
+
+    public static void main(String[] args) throws Exception {
+        // Kafka broker address
+        String bootstrapServers = "localhost:9092";
+
+        // Kafka topic name
+        String topicName = "your-topic-name";
+
+        // Partition from which to delete records
+        int partitionNumber = 0;
+
+        // Offset to delete records up to (non-inclusive)
+        long offsetToDelete = 100;
+
+        // Create Kafka AdminClient configuration properties
+        Properties config = new Properties();
+        config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+
+        // Create an AdminClient instance
+        try (AdminClient adminClient = AdminClient.create(config)) {
+            // Delete records from the specified partition and up to the specified offset
+            deleteRecordsFromPartition(adminClient, topicName, partitionNumber, offsetToDelete);
+
+            System.out.println("Records up to offset " + offsetToDelete + " have been deleted from partition " + partitionNumber + " in topic '" + topicName + "'.");
+        }
+    }
+
+    // Method to delete records from a specified partition up to a specific offset
+    private static void deleteRecordsFromPartition(AdminClient adminClient, String topicName, int partitionNumber, long offsetToDelete) throws ExecutionException, InterruptedException {
+        TopicPartition topicPartition = new TopicPartition(topicName, partitionNumber);
+        Map<TopicPartition, Long> partitionOffsets = Collections.singletonMap(topicPartition, offsetToDelete);
+
+        DeleteRecordsResult deleteRecordsResult = adminClient.deleteRecords(partitionOffsets);
+
+        // Wait for the delete operation to complete
+        KafkaFuture<Void> future = deleteRecordsResult.all();
+        future.get();
+    }
+}
