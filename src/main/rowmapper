@@ -1,0 +1,17 @@
+public class RecordLogRowMapper implements RowMapper<RecordLog> {
+    @Override
+    public RecordLog mapRow(ResultSet rs, int rowNum) throws SQLException {
+        RecordLog recordLog = new RecordLog();
+        recordLog.setId(rs.getLong("KTI_ID"));
+        recordLog.setTopicName(rs.getString("KTI_TOPIC"));
+        recordLog.setAppName(rs.getString("KTI_APP_NAME"));
+        recordLog.setType(rs.getString("KTI_TYPE"));
+        recordLog.setJsonString(rs.getString("KTI_JSON"));
+        recordLog.setStatus(rs.getString("KTI_STATUS"));
+        recordLog.setErrorMessage(rs.getString("KTI_ERROR_MESSAGE"));
+        recordLog.setErrorCNT(rs.getInt("KTI_ERROR_CNT"));
+        recordLog.setCreatedTimestamp(rs.getTimestamp("KTI_CREATED_TIMESTAMP").toLocalDateTime());
+        recordLog.setUpdatedTimestamp(rs.getTimestamp("KTI_LAST_UPDATED_TIMESTAMP").toLocalDateTime());
+        return recordLog;
+    }
+}
