@@ -1,0 +1,115 @@
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
+import org.springframework.http.*;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.function.Function;
+
+@PostMapping(value = "/getIndex", produces = MediaType.APPLICATION_JSON_VALUE)
+public ResponseEntity<StreamingResponseBody> getIndex(@RequestParam(defaultValue = "1") int indexAMT) {
+    LOG.info("Start Get Index Service (streaming)");
+    LOG.info("Amount Requested: {}", indexAMT);
+
+    // 1) validate amount
+    if (!indexServiceHelper.checkAmtNeeded(indexAMT)) {
+        String errJson = """
+            {"message":"Index Request Amount Exceeded! Must be <= 50000.","data":null}
+        """;
+        return ResponseEntity.badRequest()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(os -> os.write(errJson.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    // 2) try to acquire lock (no getIndexBusy() used)
+    final int locked;
+    try {
+        locked = indexServiceDao.updateBusy();   // your existing lock call (assume >0 = locked)
+    } catch (Exception e) {
+        LOG.error("Failed to set busy flag", e);
+        String errJson = """
+            {"message":"Internal server error. Please try again later.","data":null}
+        """;
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(os -> os.write(errJson.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    if (locked <= 0) {
+        String busyJson = """
+            {"message":"Table is busy, try again later.","data":null}
+        """;
+        return ResponseEntity.status(HttpStatus.LOCKED) // 423
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(os -> os.write(busyJson.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    // 3) locked: set up streaming body; will always unlock in finally
+    StreamingResponseBody body = (OutputStream os) -> {
+        boolean unlockNeeded = true;
+        JsonFactory jf = new JsonFactory();
+
+        try (JsonGenerator gen = jf.createGenerator(os)) {
+            // start wrapper: { "message": "...", "data": [ ... ] }
+            gen.writeStartObject();
+            gen.writeStringField("message", "Success");
+            gen.writeArrayFieldStart("data");
+
+            // mapper to turn Index -> String (keeps same semantics as your List<String>)
+            final Function<Index, String> mapper = Index::toString;
+            // If you want full objects instead of strings, later change gen.writeString(...) to gen.writeObject(idx).
+
+            // figure out starting cursor (you had this in your code)
+            var lockSeqStart = indexServiceDao.getLastSeqNumberUsed();
+            int startSeqNum = lockSeqStart.get(0).getSeqNum();
+            int cursor = startSeqNum;
+
+            // stream in batches
+            final int batchSize = 5_000;   // tune 5k–10k after profiling
+            int remaining = indexAMT;
+
+            while (remaining > 0) {
+                int page = Math.min(batchSize, remaining);
+
+                // your existing DAO call (keyset by seq preferred)
+                var batch = indexServiceDao.getIndexes(cursor, page);
+                if (batch == null || batch.isEmpty()) break;
+
+                indexServiceHelper.logFirstLast(batch); // your existing debug helper
+
+                // write each row
+                for (Index idx : batch) {
+                    gen.writeString(mapper.apply(idx)); // <- change to gen.writeObject(idx) for full Index JSON
+                }
+                gen.flush(); // push this chunk to client
+
+                cursor = batch.get(batch.size() - 1).getSeqNum() + 1; // advance cursor
+                remaining -= batch.size();
+            }
+
+            gen.writeEndArray();
+            gen.writeEndObject();
+            gen.flush();
+            LOG.info("Streaming completed.");
+
+        } catch (Exception streamEx) {
+            LOG.error("Exception while streaming", streamEx);
+        } finally {
+            if (unlockNeeded) {
+                try {
+                    indexServiceDao.updateNotBusy();
+                } catch (Exception unlockEx) {
+                    LOG.error("Failed to clear busy flag after streaming", unlockEx);
+                }
+            }
+        }
+    };
+
+    return ResponseEntity.ok()
+            .contentType(MediaType.APPLICATION_JSON)
+            // Optional if you want a download:
+            // .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"indexes.json\"")
+            .body(body);
+}
